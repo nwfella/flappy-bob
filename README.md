@@ -10,9 +10,15 @@ A SpongeBob SquarePants themed Flappy Bird clone — built from scratch with van
 - 🪸 **Coral pipe obstacles** — textured with Bikini Bottom vibes
 - 🌊 **Animated bubbles** — with wobble physics in the background
 - 🏖️ **Sandy sea floor** — with moving sand dimple details
+- 🔊 **Sound effects** — flap, score, death, and medal fanfares via Web Audio API (no external files!)
+- 💀 **Dramatic death sequence** — ragdoll spin, X eyes, screen shake, particle explosion
+- ✨ **Particle system** — confetti bursts on scoring, explosion on death
+- 📈 **Dynamic difficulty** — pipes get faster, gaps shrink as you score higher
+- 🏅 **Medal system** — Bronze/Silver/Gold/Platinum based on score
+- 🎨 **Extra polish** — jellyfish silhouettes, seaweed on pipes, motion trail, score pop animation
 - 📱 **Mobile friendly** — touch, tap, and keyboard controls
 - 🏆 **Best score** — persisted via localStorage
-- 🔄 **Full game loop** — start screen → gameplay → game over → replay
+- 🔄 **Full game loop** — start screen → gameplay → death sequence → medals → replay
 
 ## How to Play
 
