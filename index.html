@@ -38,13 +38,8 @@
             touch-callout: none;
         }
 
-        /* Desktop/landscape cap - keep it reasonable on wide screens */
-        @media (min-width: 1024px) and (orientation: landscape) {
-            #game-container {
-                max-width: 500px;
-                max-height: 750px;
-            }
-        }
+        /* No landscape cap — aspect-ratio automatically maximizes the play area
+           on every device. On desktop, just resize the browser if you want it smaller. */
 
         canvas {
             display: block;
@@ -191,6 +186,7 @@
     // Game Variables
     let frames = 0;
     let score = 0;
+    let scorePopTimer = 0;
     let bestScore = Number(localStorage.getItem('flappyBobBestScore')) || 0;
 
     // Game States
@@ -215,21 +211,21 @@
         }
     }
 
-    function playTone(freq, duration, type = 'sine', volume = 0.3) {
+    function playToneAt(freq, startTime, duration, type = 'sine', volume = 0.3) {
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(volume, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
         osc.connect(gain);
         gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
     }
 
-    function playNoise(duration, volume = 0.2) {
+    function playNoiseAt(duration, startTime, volume = 0.2) {
         if (!audioCtx) return;
         const bufferSize = audioCtx.sampleRate * duration;
         const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
@@ -242,125 +238,159 @@
         const gain = audioCtx.createGain();
         const filter = audioCtx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(800, audioCtx.currentTime);
-        filter.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + duration);
-        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        filter.frequency.setValueAtTime(800, startTime);
+        filter.frequency.exponentialRampToValueAtTime(100, startTime + duration);
+        gain.gain.setValueAtTime(volume, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
         source.connect(filter);
         filter.connect(gain);
         gain.connect(audioCtx.destination);
-        source.start();
+        source.start(startTime);
     }
 
     const SFX = {
         flap() {
             if (!audioCtx) return;
+            const t = audioCtx.currentTime;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.08);
-            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            osc.frequency.setValueAtTime(300, t);
+            osc.frequency.exponentialRampToValueAtTime(600, t + 0.08);
+            gain.gain.setValueAtTime(0.2, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.1);
-            // Add a little noise burst for "whoosh"
-            playNoise(0.06, 0.08);
+            osc.start(t);
+            osc.stop(t + 0.1);
+            playNoiseAt(0.06, t, 0.08);
         },
 
         score() {
-            playTone(523, 0.1, 'sine', 0.25);
-            setTimeout(() => playTone(659, 0.15, 'sine', 0.25), 80);
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+            playToneAt(523, t, 0.1, 'sine', 0.25);
+            playToneAt(659, t + 0.08, 0.15, 'sine', 0.25);
         },
 
         die() {
-            playNoise(0.3, 0.35);
-            // Descending tone
             if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+            playNoiseAt(0.3, t, 0.35);
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.4);
-            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+            osc.frequency.setValueAtTime(400, t);
+            osc.frequency.exponentialRampToValueAtTime(60, t + 0.4);
+            gain.gain.setValueAtTime(0.25, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.4);
+            osc.start(t);
+            osc.stop(t + 0.4);
         },
 
         swoosh() {
-            playTone(440, 0.05, 'sine', 0.1);
-            setTimeout(() => playTone(550, 0.05, 'sine', 0.12), 40);
-            setTimeout(() => playTone(660, 0.08, 'sine', 0.15), 80);
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+            playToneAt(440, t, 0.05, 'sine', 0.1);
+            playToneAt(550, t + 0.04, 0.05, 'sine', 0.12);
+            playToneAt(660, t + 0.08, 0.08, 'sine', 0.15);
         },
 
         medal() {
             if (!audioCtx) return;
+            const t = audioCtx.currentTime;
             [523, 659, 784, 1047].forEach((freq, i) => {
-                setTimeout(() => playTone(freq, 0.2, 'sine', 0.2), i * 120);
+                playToneAt(freq, t + i * 0.12, 0.2, 'sine', 0.2);
             });
         }
     };
 
-    // ========== PARTICLE SYSTEM ==========
+    // ========== PARTICLE SYSTEM (Object Pool — zero allocations) ==========
 
-    let particles = [];
+    const PARTICLE_POOL_SIZE = 200;
+    const particlePool = [];
+    let activeParticles = 0;
 
-    function spawnParticles(x, y, count, color, spread, life) {
-        for (let i = 0; i < count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = Math.random() * spread + 1;
-            particles.push({
-                x, y,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed - 2,
-                radius: Math.random() * 4 + 2,
-                color: color || (['#fceb3b','#00aaff','#e24d86','#ff0000','#ffffff'])[Math.floor(Math.random()*5)],
-                life: Math.random() * life + life * 0.3,
-                maxLife: life * 1.3,
-                gravity: 0.08
-            });
+    // Pre-allocate all particles
+    function initParticlePool() {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            particlePool.push({ alive: false });
+        }
+    }
+    initParticlePool();
+
+    function spawnParticle(x, y, vx, vy, radius, color, life, gravity, glow) {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            const p = particlePool[i];
+            if (!p.alive) {
+                p.alive = true;
+                p.x = x; p.y = y; p.vx = vx; p.vy = vy;
+                p.radius = radius; p.color = color;
+                p.life = life; p.maxLife = life;
+                p.gravity = gravity; p.glow = glow || false;
+                activeParticles++;
+                return p;
+            }
         }
     }
 
-    function spawnScoreParticles(x, y) {
+    function spawnBurst(x, y, count, colors, spread, life, gravity, glow) {
+        const colorArr = colors || ['#fceb3b','#00aaff','#e24d86','#ff0000','#ffffff'];
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * spread + 1;
+            spawnParticle(
+                x, y,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed - 2,
+                Math.random() * 4 + 2,
+                colorArr[Math.floor(Math.random() * colorArr.length)],
+                Math.random() * life + life * 0.3,
+                gravity,
+                glow
+            );
+        }
+    }
+
+    function spawnScoreBurst(x, y) {
         const colors = ['#fceb3b', '#ffd700', '#00ff88', '#ff6b6b', '#ff9ff3'];
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 6; i++) {  // 6 instead of 12 — fewer particles, same visual impact
             const angle = Math.random() * Math.PI * 2;
             const speed = Math.random() * 4 + 2;
-            particles.push({
+            spawnParticle(
                 x, y,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed - 3,
-                radius: Math.random() * 3 + 2,
-                color: colors[Math.floor(Math.random() * colors.length)],
-                life: 30 + Math.random() * 20,
-                maxLife: 50,
-                gravity: 0.05,
-                glow: true
-            });
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed - 3,
+                Math.random() * 3 + 2,
+                colors[Math.floor(Math.random() * colors.length)],
+                30 + Math.random() * 20,
+                0.05,
+                true
+            );
         }
     }
 
     function updateParticles() {
-        for (let i = particles.length - 1; i >= 0; i--) {
-            const p = particles[i];
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            const p = particlePool[i];
+            if (!p.alive) continue;
             p.x += p.vx;
             p.y += p.vy;
             p.vy += p.gravity;
             p.life--;
             if (p.life <= 0) {
-                particles.splice(i, 1);
+                p.alive = false;
+                activeParticles--;
             }
         }
     }
 
     function drawParticles() {
-        for (const p of particles) {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            const p = particlePool[i];
+            if (!p.alive) continue;
             const alpha = Math.max(0, p.life / p.maxLife);
             ctx.save();
             ctx.globalAlpha = alpha;
@@ -856,19 +886,17 @@
                 };
 
                 if(checkCollision(birdRect, topPipeRect) || checkCollision(birdRect, bottomPipeRect)) {
-                    spawnParticles(bird.x + bird.w/2, bird.y + bird.h/2, 20, null, 5, 40);
+                    spawnBurst(bird.x + bird.w/2, bird.y + bird.h/2, 20, null, 5, 40, 0.08);
                     startDeathSequence();
                 }
 
-                // Score
+                // Score — canvas-drawn, no DOM writes
                 if(!p.scored && p.x + this.top.w < bird.x) {
                     p.scored = true;
                     score += 1;
-                    liveScoreText.innerText = score;
-                    liveScoreText.classList.add('pop');
-                    setTimeout(() => liveScoreText.classList.remove('pop'), 100);
+                    scorePopTimer = 10;  // trigger scale pop on canvas
                     SFX.score();
-                    spawnScoreParticles(bird.x + bird.w, bird.y + bird.h/2);
+                    spawnScoreBurst(bird.x + bird.w, bird.y + bird.h/2);
                 }
 
                 // Remove pipes that passed
@@ -893,7 +921,7 @@
         SFX.die();
         triggerShake(6, 15);
         // Spawn explosion particles at bird position
-        spawnParticles(bird.x + bird.w/2, bird.y + bird.h/2, 25, null, 6, 50);
+        spawnBurst(bird.x + bird.w/2, bird.y + bird.h/2, 25, null, 6, 50, 0.08);
     }
 
     // --- RENDER & GAME LOOP ---
@@ -915,6 +943,25 @@
         floor.draw();
         bird.draw();
         drawParticles();
+
+        // Canvas-drawn score (no DOM writes = no layout jank)
+        if (state.current === state.game || state.current === state.dying) {
+            const popScale = scorePopTimer > 0 ? 1 + (scorePopTimer / 10) * 0.4 : 1;
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.font = 'bold 48px "Lilita One", cursive';
+            // Outline
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 6;
+            ctx.strokeText(score, canvas.width / 2, 20);
+            // Fill
+            ctx.fillStyle = scorePopTimer > 0 ? '#ffe066' : '#fff';
+            ctx.translate(canvas.width / 2, 20);
+            ctx.scale(popScale, popScale);
+            ctx.fillText(score, 0, 0);
+            ctx.restore();
+        }
 
         ctx.restore();
     }
@@ -943,6 +990,8 @@
         floor.update();
         pipes.update();
         updateParticles();
+        // Score pop timer countdown
+        if (scorePopTimer > 0) scorePopTimer--;
     }
 
     function loop() {
@@ -962,7 +1011,6 @@
     function showStartScreen() {
         startScreen.classList.remove('hidden');
         startScreen.classList.add('visible');
-        liveScoreText.classList.add('hidden');
         gameOverScreen.classList.remove('visible');
         gameOverScreen.classList.add('hidden');
         drawPreview();
@@ -971,12 +1019,9 @@
     function hideStartScreen() {
         startScreen.classList.remove('visible');
         startScreen.classList.add('hidden');
-        liveScoreText.classList.remove('hidden');
-        liveScoreText.innerText = score;
     }
 
     function showGameOver() {
-        liveScoreText.classList.add('hidden');
         finalScoreText.innerText = score;
 
         if(score > bestScore) {
@@ -1011,8 +1056,13 @@
         bird.rotation = 0;
         bird.dead = false;
         score = 0;
+        scorePopTimer = 0;
         frames = 0;
-        particles = [];
+        // Reset particle pool
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            particlePool[i].alive = false;
+        }
+        activeParticles = 0;
         shakeIntensity = 0;
         shakeDuration = 0;
         deathTimer = 0;
