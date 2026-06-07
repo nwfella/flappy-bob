@@ -32,12 +32,16 @@
             overflow: hidden;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
             border-radius: 10px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            touch-callout: none;
         }
 
         canvas {
             display: block;
             width: 100%;
             height: 100%;
+            cursor: pointer;
         }
 
         .overlay {
@@ -61,6 +65,12 @@
 
         .visible {
             opacity: 1;
+            pointer-events: none; /* Don't trap taps — let them pass through to game-container */
+        }
+
+        /* Only buttons inside visible overlays get pointer events */
+        .visible button,
+        .visible #restart-btn {
             pointer-events: auto;
         }
 
@@ -1003,13 +1013,24 @@
         state.current = state.getReady;
     }
 
+    const gameContainer = document.getElementById('game-container');
+
+    let lastTouchTime = 0;
+
     // --- INPUT HANDLING ---
 
     function handleInput(e) {
-        if (e.type !== 'click') {
-            if(e.code === 'Space' || e.type === 'touchstart') {
+        // Prevent double-fire: ignore click if a touch already handled this tap
+        if (e.type === 'click' && Date.now() - lastTouchTime < 500) return;
+
+        // Prevent default for touch and spacebar
+        if (e.type === 'touchstart' || e.type === 'touchend') {
+            e.preventDefault();
+            lastTouchTime = Date.now();
+        } else if (e.type === 'keydown') {
+            if (e.code === 'Space') {
                 e.preventDefault();
-            } else if (e.type === 'keydown' && e.code !== 'Space') {
+            } else {
                 return;
             }
         }
@@ -1033,10 +1054,10 @@
         }
     }
 
-    // Event Listeners
-    canvas.addEventListener('click', handleInput);
+    // Main game input: attach to container so overlays don't block taps
+    gameContainer.addEventListener('click', handleInput);
+    gameContainer.addEventListener('touchstart', handleInput, { passive: false });
     window.addEventListener('keydown', handleInput, { passive: false });
-    canvas.addEventListener('touchstart', handleInput, { passive: false });
 
     restartBtn.addEventListener('click', (e) => {
         e.stopPropagation();
