@@ -18,6 +18,8 @@
             height: 100vh;
             overflow: hidden;
             touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         #game-container {
@@ -81,10 +83,37 @@
             font-size: 3rem;
             z-index: 10;
             pointer-events: none;
+            transition: transform 0.1s;
         }
-       
+
+        .score-display.pop {
+            transform: scale(1.4);
+        }
+
         button {
             pointer-events: auto;
+        }
+
+        .medal {
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+        }
+
+        @keyframes float-in {
+            0% { opacity: 0; transform: translateY(20px) scale(0.8); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .float-in {
+            animation: float-in 0.5s ease-out forwards;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { text-shadow: 0 0 10px currentColor; }
+            50% { text-shadow: 0 0 25px currentColor, 0 0 50px currentColor; }
+        }
+
+        .pulse-glow {
+            animation: pulse-glow 1.5s ease-in-out infinite;
         }
     </style>
 </head>
@@ -92,13 +121,14 @@
 
     <div id="game-container">
         <canvas id="gameCanvas" width="400" height="600"></canvas>
-       
+
         <!-- Live Score -->
         <div id="live-score" class="score-display text-stroke hidden">0</div>
 
         <!-- Start Screen -->
         <div id="start-screen" class="overlay visible">
-            <h1 class="text-5xl text-stroke mb-4 text-center text-yellow-300">FLAPPY BOB</h1>
+            <h1 class="text-5xl text-stroke mb-2 text-center text-yellow-300 pulse-glow">FLAPPY BOB</h1>
+            <p class="text-lg text-stroke mb-1 text-center px-4">🧽 Bikini Bottom Edition 🧽</p>
             <p class="text-xl text-stroke mb-8 animate-bounce text-center px-4">Tap, Click, or Press Space to Flap!</p>
             <div class="w-24 h-32 relative">
                 <canvas id="previewCanvas" width="100" height="120"></canvas>
@@ -107,12 +137,15 @@
 
         <!-- Game Over Screen -->
         <div id="game-over-screen" class="overlay hidden bg-black/60 backdrop-blur-sm">
-            <h2 class="text-4xl text-stroke text-red-500 mb-6">GAME OVER</h2>
-            <div class="bg-yellow-100 rounded-xl p-6 border-4 border-yellow-400 shadow-xl text-center mb-6">
-                <p class="text-2xl text-gray-800 mb-2">Score</p>
-                <p id="final-score" class="text-4xl text-stroke text-yellow-500 mb-4">0</p>
-                <p class="text-xl text-gray-800 mb-2">Best</p>
+            <h2 class="text-4xl text-stroke text-red-500 mb-4">GAME OVER</h2>
+            <div class="bg-yellow-100 rounded-xl p-6 border-4 border-yellow-400 shadow-xl text-center mb-4 min-w-[200px]">
+                <!-- Medal Display -->
+                <div id="medal-display" class="mb-3 text-5xl hidden"></div>
+                <p class="text-2xl text-gray-800 mb-1">Score</p>
+                <p id="final-score" class="text-4xl text-stroke text-yellow-500 mb-3">0</p>
+                <p class="text-xl text-gray-800 mb-1">Best</p>
                 <p id="best-score" class="text-3xl text-stroke text-orange-500">0</p>
+                <p id="medal-text" class="text-lg text-stroke mt-2 hidden"></p>
             </div>
             <button id="restart-btn" class="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white text-2xl py-3 px-8 rounded-full border-4 border-white shadow-lg text-stroke transition-transform transform hover:scale-105 active:scale-95">
                 PLAY AGAIN
@@ -132,40 +165,277 @@
     const liveScoreText = document.getElementById('live-score');
     const finalScoreText = document.getElementById('final-score');
     const bestScoreText = document.getElementById('best-score');
+    const medalDisplay = document.getElementById('medal-display');
+    const medalText = document.getElementById('medal-text');
     const restartBtn = document.getElementById('restart-btn');
 
     // Game Variables
     let frames = 0;
     let score = 0;
-    let bestScore = localStorage.getItem('flappyBobBestScore') || 0;
-   
+    let bestScore = Number(localStorage.getItem('flappyBobBestScore')) || 0;
+
     // Game States
     const state = {
         current: 0,
         getReady: 0,
         game: 1,
-        over: 2
+        over: 2,
+        dying: 3
     };
+
+    // ========== AUDIO ENGINE (Web Audio API - no external files) ==========
+
+    let audioCtx = null;
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+    }
+
+    function playTone(freq, duration, type = 'sine', volume = 0.3) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function playNoise(duration, volume = 0.2) {
+        if (!audioCtx) return;
+        const bufferSize = audioCtx.sampleRate * duration;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+        }
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        const gain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, audioCtx.currentTime);
+        filter.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + duration);
+        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+        source.start();
+    }
+
+    const SFX = {
+        flap() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.08);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+            // Add a little noise burst for "whoosh"
+            playNoise(0.06, 0.08);
+        },
+
+        score() {
+            playTone(523, 0.1, 'sine', 0.25);
+            setTimeout(() => playTone(659, 0.15, 'sine', 0.25), 80);
+        },
+
+        die() {
+            playNoise(0.3, 0.35);
+            // Descending tone
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.4);
+            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.4);
+        },
+
+        swoosh() {
+            playTone(440, 0.05, 'sine', 0.1);
+            setTimeout(() => playTone(550, 0.05, 'sine', 0.12), 40);
+            setTimeout(() => playTone(660, 0.08, 'sine', 0.15), 80);
+        },
+
+        medal() {
+            if (!audioCtx) return;
+            [523, 659, 784, 1047].forEach((freq, i) => {
+                setTimeout(() => playTone(freq, 0.2, 'sine', 0.2), i * 120);
+            });
+        }
+    };
+
+    // ========== PARTICLE SYSTEM ==========
+
+    let particles = [];
+
+    function spawnParticles(x, y, count, color, spread, life) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * spread + 1;
+            particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed - 2,
+                radius: Math.random() * 4 + 2,
+                color: color || (['#fceb3b','#00aaff','#e24d86','#ff0000','#ffffff'])[Math.floor(Math.random()*5)],
+                life: Math.random() * life + life * 0.3,
+                maxLife: life * 1.3,
+                gravity: 0.08
+            });
+        }
+    }
+
+    function spawnScoreParticles(x, y) {
+        const colors = ['#fceb3b', '#ffd700', '#00ff88', '#ff6b6b', '#ff9ff3'];
+        for (let i = 0; i < 12; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 4 + 2;
+            particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed - 3,
+                radius: Math.random() * 3 + 2,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                life: 30 + Math.random() * 20,
+                maxLife: 50,
+                gravity: 0.05,
+                glow: true
+            });
+        }
+    }
+
+    function updateParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += p.gravity;
+            p.life--;
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+            }
+        }
+    }
+
+    function drawParticles() {
+        for (const p of particles) {
+            const alpha = Math.max(0, p.life / p.maxLife);
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            if (p.glow) {
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 10;
+            }
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius * alpha, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    // ========== SCREEN SHAKE ==========
+
+    let shakeIntensity = 0;
+    let shakeDuration = 0;
+
+    function triggerShake(intensity, duration) {
+        shakeIntensity = intensity;
+        shakeDuration = duration;
+    }
+
+    // ========== MEDAL SYSTEM ==========
+
+    function getMedal(score) {
+        if (score >= 30) return { emoji: '🏆', name: 'PLATINUM', color: '#e5e4e2', text: 'Bikini Bottom Legend!' };
+        if (score >= 20) return { emoji: '🥇', name: 'GOLD', color: '#ffd700', text: 'Krusty Krab Champion!' };
+        if (score >= 10) return { emoji: '🥈', name: 'SILVER', color: '#c0c0c0', text: 'Pretty good, Patrick!' };
+        if (score >= 5) return { emoji: '🥉', name: 'BRONZE', color: '#cd7f32', text: 'Not bad for a sponge!' };
+        return null;
+    }
+
+    // ========== DIFFICULTY RAMP ==========
+
+    function getDifficulty(score) {
+        const level = Math.floor(score / 5);
+        return {
+            gap: Math.max(100, 130 - level * 4),
+            speed: Math.min(5, 2.5 + level * 0.3),
+            pipeInterval: Math.max(70, 100 - level * 3)
+        };
+    }
+
+    // ========== DEATH SEQUENCE ==========
+
+    let deathTimer = 0;
+    const DEATH_DURATION = 60; // frames (~1 second)
 
     // --- GAME OBJECTS ---
 
     const bg = {
-        colorTop: '#4ac4f2',
-        colorBottom: '#1579b8',
         draw: function() {
             let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-            gradient.addColorStop(0, this.colorTop);
-            gradient.addColorStop(1, this.colorBottom);
+            gradient.addColorStop(0, '#4ac4f2');
+            gradient.addColorStop(0.6, '#1579b8');
+            gradient.addColorStop(1, '#0d5a8a');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw some distant jellyfish silhouettes
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            for (let i = 0; i < 3; i++) {
+                const jx = (i * 130 + frames * 0.3) % (canvas.width + 100) - 50;
+                const jy = 80 + i * 60;
+                ctx.beginPath();
+                ctx.arc(jx, jy, 15, Math.PI, 0);
+                ctx.lineTo(jx + 15, jy + 25);
+                ctx.lineTo(jx - 15, jy + 25);
+                ctx.closePath();
+                ctx.fill();
+                // Tentacles
+                for (let t = 0; t < 3; t++) {
+                    ctx.beginPath();
+                    ctx.moveTo(jx - 8 + t * 8, jy + 5);
+                    ctx.quadraticCurveTo(
+                        jx - 8 + t * 8 + Math.sin(frames * 0.02 + i + t) * 10,
+                        jy + 35,
+                        jx - 8 + t * 8 + Math.sin(frames * 0.03 + i + t) * 15,
+                        jy + 45
+                    );
+                    ctx.stroke();
+                }
+            }
         }
     };
 
     const bubbles = {
         items: [],
         draw: function() {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.lineWidth = 2;
             for(let i = 0; i < this.items.length; i++) {
                 let b = this.items[i];
@@ -173,17 +443,17 @@
                 ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
-               
+
                 // Bubble highlight
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
                 ctx.beginPath();
                 ctx.arc(b.x - b.radius * 0.3, b.y - b.radius * 0.3, b.radius * 0.2, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; // reset
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
             }
         },
         update: function() {
-            if(frames % 20 === 0 && Math.random() > 0.5) {
+            if(frames % 20 === 0 && Math.random() > 0.4) {
                 this.items.push({
                     x: Math.random() * canvas.width,
                     y: canvas.height + 20,
@@ -197,7 +467,7 @@
                 let b = this.items[i];
                 b.y -= b.speed;
                 b.x += Math.sin(frames * 0.05 + b.wobble) * 1;
-               
+
                 if(b.y + b.radius < 0) {
                     this.items.shift();
                     i--;
@@ -213,13 +483,17 @@
         y: 500,
         dx: 2.5,
         draw: function() {
-            // Sand color
+            // Sand
             ctx.fillStyle = '#e8d287';
             ctx.fillRect(0, this.y, canvas.width, this.h);
-           
+
             // Sand top border
             ctx.fillStyle = '#dcb458';
             ctx.fillRect(0, this.y, canvas.width, 10);
+
+            // Sand shadow beneath border
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            ctx.fillRect(0, this.y + 10, canvas.width, 3);
 
             // Moving sand dimples
             ctx.fillStyle = '#c5a045';
@@ -230,6 +504,19 @@
                 ctx.arc(dotX, this.y + 30 + (i%3)*15, 3, 0, Math.PI * 2);
                 ctx.fill();
             }
+
+            // Tiny shells on the sand
+            const shellColors = ['#f0d9b5', '#d4a574', '#e8c4a0'];
+            ctx.fillStyle = shellColors[Math.floor((frames / 100) % 3)];
+            for (let i = 0; i < 3; i++) {
+                const sx = (i * 130 + 20) % canvas.width;
+                ctx.beginPath();
+                ctx.arc(sx, this.y + 55 + i * 15, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(sx + 5, this.y + 55 + i * 15, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
         },
         update: function() {
             if(state.current === state.game) {
@@ -238,34 +525,34 @@
         }
     };
 
-    function drawSpongeBobCharacter(context, w, h) {
-        // Body (Yellow Rectangle)
-        context.fillStyle = '#fceb3b';
+    function drawSpongeBobCharacter(context, w, h, dead) {
+        // Body
+        context.fillStyle = dead ? '#d4c030' : '#fceb3b';
         context.fillRect(0, 0, w, h * 0.7);
         context.strokeStyle = '#c4b52b';
         context.lineWidth = 2;
         context.strokeRect(0, 0, w, h * 0.7);
 
-        // Sponge pores (Greenish circles)
+        // Sponge pores
         context.fillStyle = '#cca711';
         const pores = [[w*0.15, h*0.15, w*0.08], [w*0.8, h*0.2, w*0.1], [w*0.2, h*0.5, w*0.06], [w*0.85, h*0.55, w*0.08], [w*0.5, h*0.1, w*0.05]];
         pores.forEach(p => {
             context.beginPath(); context.arc(p[0], p[1], p[2], 0, Math.PI*2); context.fill();
         });
 
-        // Shirt (White)
-        context.fillStyle = '#ffffff';
+        // Shirt
+        context.fillStyle = dead ? '#d0d0d0' : '#ffffff';
         context.fillRect(0, h * 0.7, w, h * 0.12);
         context.strokeRect(0, h * 0.7, w, h * 0.12);
-       
+
         // Shirt Collar
         context.beginPath();
         context.moveTo(w*0.3, h*0.7); context.lineTo(w*0.4, h*0.78); context.lineTo(w*0.5, h*0.7);
         context.moveTo(w*0.5, h*0.7); context.lineTo(w*0.6, h*0.78); context.lineTo(w*0.7, h*0.7);
         context.stroke();
 
-        // Tie (Red)
-        context.fillStyle = '#ff0000';
+        // Tie
+        context.fillStyle = dead ? '#880000' : '#ff0000';
         context.beginPath();
         context.moveTo(w*0.5, h*0.75);
         context.lineTo(w*0.55, h*0.82);
@@ -275,58 +562,76 @@
         context.fill();
         context.stroke();
 
-        // Pants (Brown)
-        context.fillStyle = '#8b5a2b';
+        // Pants
+        context.fillStyle = dead ? '#6b441e' : '#8b5a2b';
         context.fillRect(0, h * 0.82, w, h * 0.18);
         context.strokeRect(0, h * 0.82, w, h * 0.18);
-       
+
         // Belt
         context.fillStyle = '#000000';
         context.fillRect(w*0.1, h*0.86, w*0.15, h*0.03);
         context.fillRect(w*0.4, h*0.86, w*0.2, h*0.03);
         context.fillRect(w*0.75, h*0.86, w*0.15, h*0.03);
 
-        // Eyes (White circles with blue/black centers)
-        context.fillStyle = 'white';
+        // Eyes
+        context.fillStyle = dead ? '#e0e0e0' : 'white';
         context.beginPath(); context.arc(w*0.3, h*0.35, w*0.25, 0, Math.PI*2); context.fill(); context.stroke();
         context.beginPath(); context.arc(w*0.7, h*0.35, w*0.25, 0, Math.PI*2); context.fill(); context.stroke();
 
-        // Irises (Blue)
-        context.fillStyle = '#00aaff';
-        context.beginPath(); context.arc(w*0.35, h*0.35, w*0.1, 0, Math.PI*2); context.fill();
-        context.beginPath(); context.arc(w*0.65, h*0.35, w*0.1, 0, Math.PI*2); context.fill();
+        if (dead) {
+            // X eyes for death
+            context.strokeStyle = '#ff0000';
+            context.lineWidth = 3;
+            context.beginPath();
+            context.moveTo(w*0.2, h*0.25); context.lineTo(w*0.4, h*0.45);
+            context.moveTo(w*0.4, h*0.25); context.lineTo(w*0.2, h*0.45);
+            context.stroke();
+            context.beginPath();
+            context.moveTo(w*0.6, h*0.25); context.lineTo(w*0.8, h*0.45);
+            context.moveTo(w*0.8, h*0.25); context.lineTo(w*0.6, h*0.45);
+            context.stroke();
+        } else {
+            // Irises
+            context.fillStyle = '#00aaff';
+            context.beginPath(); context.arc(w*0.35, h*0.35, w*0.1, 0, Math.PI*2); context.fill();
+            context.beginPath(); context.arc(w*0.65, h*0.35, w*0.1, 0, Math.PI*2); context.fill();
 
-        // Pupils (Black)
-        context.fillStyle = 'black';
-        context.beginPath(); context.arc(w*0.35, h*0.35, w*0.05, 0, Math.PI*2); context.fill();
-        context.beginPath(); context.arc(w*0.65, h*0.35, w*0.05, 0, Math.PI*2); context.fill();
-       
-        // Eyelashes
-        context.lineWidth = 2;
-        context.beginPath(); context.moveTo(w*0.2, h*0.15); context.lineTo(w*0.25, h*0.1); context.stroke();
-        context.beginPath(); context.moveTo(w*0.3, h*0.13); context.lineTo(w*0.3, h*0.08); context.stroke();
-        context.beginPath(); context.moveTo(w*0.4, h*0.15); context.lineTo(w*0.35, h*0.1); context.stroke();
-       
-        context.beginPath(); context.moveTo(w*0.6, h*0.15); context.lineTo(w*0.65, h*0.1); context.stroke();
-        context.beginPath(); context.moveTo(w*0.7, h*0.13); context.lineTo(w*0.7, h*0.08); context.stroke();
-        context.beginPath(); context.moveTo(w*0.8, h*0.15); context.lineTo(w*0.75, h*0.1); context.stroke();
+            // Pupils
+            context.fillStyle = 'black';
+            context.beginPath(); context.arc(w*0.35, h*0.35, w*0.05, 0, Math.PI*2); context.fill();
+            context.beginPath(); context.arc(w*0.65, h*0.35, w*0.05, 0, Math.PI*2); context.fill();
+
+            // Eyelashes
+            context.lineWidth = 2;
+            context.beginPath(); context.moveTo(w*0.2, h*0.15); context.lineTo(w*0.25, h*0.1); context.stroke();
+            context.beginPath(); context.moveTo(w*0.3, h*0.13); context.lineTo(w*0.3, h*0.08); context.stroke();
+            context.beginPath(); context.moveTo(w*0.4, h*0.15); context.lineTo(w*0.35, h*0.1); context.stroke();
+
+            context.beginPath(); context.moveTo(w*0.6, h*0.15); context.lineTo(w*0.65, h*0.1); context.stroke();
+            context.beginPath(); context.moveTo(w*0.7, h*0.13); context.lineTo(w*0.7, h*0.08); context.stroke();
+            context.beginPath(); context.moveTo(w*0.8, h*0.15); context.lineTo(w*0.75, h*0.1); context.stroke();
+        }
 
         // Nose
-        context.fillStyle = '#fceb3b';
+        context.fillStyle = dead ? '#d4c030' : '#fceb3b';
         context.beginPath();
         context.arc(w*0.5, h*0.45, w*0.08, 0, Math.PI*2);
         context.fill();
         context.stroke();
 
-        // Smile
+        // Smile (frown when dead)
         context.strokeStyle = 'black';
         context.lineWidth = 2;
         context.beginPath();
-        context.arc(w*0.5, h*0.5, w*0.3, 0, Math.PI);
+        if (dead) {
+            context.arc(w*0.5, h*0.52, w*0.2, Math.PI, 0);
+        } else {
+            context.arc(w*0.5, h*0.5, w*0.3, 0, Math.PI);
+        }
         context.stroke();
-       
+
         // Teeth
-        context.fillStyle = 'white';
+        context.fillStyle = dead ? '#c0c0c0' : 'white';
         context.fillRect(w*0.4, h*0.65, w*0.08, h*0.08);
         context.strokeRect(w*0.4, h*0.65, w*0.08, h*0.08);
         context.fillRect(w*0.52, h*0.65, w*0.08, h*0.08);
@@ -334,46 +639,65 @@
     }
 
     const bird = {
-        animation: [0, 1, 2, 1],
-        frame: 0,
         x: 50,
         y: 150,
         w: 38,
         h: 46,
-        radius: 18,
         speed: 0,
         gravity: 0.25,
         jump: -5.5,
         rotation: 0,
-       
+        dead: false,
+
         draw: function() {
             ctx.save();
-            ctx.translate(this.x + this.w/2, this.y + this.h/2);
-            ctx.rotate(this.rotation);
-            ctx.translate(-this.w/2, -this.h/2);
-           
-            drawSpongeBobCharacter(ctx, this.w, this.h);
+
+            // Motion trail effect
+            if (state.current === state.game && this.speed < 0) {
+                ctx.globalAlpha = 0.1;
+                ctx.translate(this.x + this.w/2 - 8, this.y + this.h/2);
+                ctx.rotate(this.rotation);
+                ctx.translate(-this.w/2, -this.h/2);
+                drawSpongeBobCharacter(ctx, this.w, this.h, false);
+                ctx.restore();
+                ctx.save();
+                ctx.translate(this.x + this.w/2, this.y + this.h/2);
+                ctx.rotate(this.rotation);
+                ctx.translate(-this.w/2, -this.h/2);
+                drawSpongeBobCharacter(ctx, this.w, this.h, this.dead);
+            } else {
+                ctx.translate(this.x + this.w/2, this.y + this.h/2);
+                ctx.rotate(this.rotation);
+                ctx.translate(-this.w/2, -this.h/2);
+                drawSpongeBobCharacter(ctx, this.w, this.h, this.dead);
+            }
 
             ctx.restore();
         },
-       
+
         flap: function() {
             this.speed = this.jump;
+            SFX.flap();
         },
-       
+
         update: function() {
-            // If get ready state, hover slowly
             if(state.current === state.getReady) {
                 this.y = 150 + Math.cos(frames / 15) * 5;
                 this.rotation = 0;
+                this.dead = false;
+            } else if (state.current === state.dying) {
+                // Death ragdoll: spin and fall
+                this.speed += this.gravity * 0.6;
+                this.y += this.speed;
+                this.rotation += 10 * Math.PI / 180;
+                this.dead = true;
             } else {
                 this.speed += this.gravity;
                 this.y += this.speed;
-               
+
                 if(this.speed < this.jump) {
                     this.rotation = -25 * Math.PI/180;
                 } else if(this.speed > 0) {
-                    // Fall down rotation
                     this.rotation += 3 * Math.PI/180;
                     if(this.rotation > 70 * Math.PI/180) {
                         this.rotation = 70 * Math.PI/180;
@@ -381,16 +705,15 @@
                 } else {
                     this.rotation = -25 * Math.PI/180;
                 }
-               
+
                 // Floor collision
                 if(this.y + this.h/2 >= canvas.height - floor.h) {
                     this.y = canvas.height - floor.h - this.h/2;
                     if(state.current === state.game) {
-                        state.current = state.over;
-                        showGameOver();
+                        startDeathSequence();
                     }
                 }
-               
+
                 // Ceiling collision
                 if(this.y < 0) {
                     this.y = 0;
@@ -398,7 +721,7 @@
                 }
             }
         },
-       
+
         speedReset: function() {
             this.speed = 0;
         }
@@ -411,24 +734,22 @@
         dx: 2.5,
         gap: 130,
         maxYPos: -150,
-       
+
         draw: function() {
             for(let i = 0; i < this.position.length; i++) {
                 let p = this.position[i];
                 let topYPos = p.y;
-                let bottomYPos = p.y + this.top.h + this.gap;
-               
-                // Function to draw coral pipe
+                let bottomYPos = p.y + this.top.h + p.currentGap;
+
                 const drawCoralPipe = (x, y, w, h, isTop) => {
-                    ctx.fillStyle = '#e24d86'; // Pink coral color
+                    ctx.fillStyle = '#e24d86';
                     ctx.fillRect(x, y, w, h);
-                   
-                    // Borders
+
                     ctx.strokeStyle = '#8c2049';
                     ctx.lineWidth = 3;
                     ctx.strokeRect(x, y, w, h);
 
-                    // Coral textures (dots)
+                    // Coral textures
                     ctx.fillStyle = '#b63062';
                     for(let d=0; d<h/20; d++) {
                         ctx.beginPath();
@@ -439,40 +760,54 @@
                         ctx.fill();
                     }
 
-                    // Pipe end cap (wider part)
+                    // Pipe end cap
                     ctx.fillStyle = '#f976a9';
                     let capY = isTop ? y + h - 20 : y;
                     ctx.fillRect(x - 5, capY, w + 10, 20);
                     ctx.strokeRect(x - 5, capY, w + 10, 20);
+
+                    // Seaweed on top pipe
+                    if (isTop) {
+                        ctx.fillStyle = '#2ecc71';
+                        ctx.beginPath();
+                        ctx.ellipse(x + 10, y + h - 5, 8, 15, -0.3, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.fillStyle = '#27ae60';
+                        ctx.beginPath();
+                        ctx.ellipse(x + 50, y + h - 10, 6, 12, 0.3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
                 };
 
-                // Top Pipe
                 drawCoralPipe(p.x, topYPos, this.top.w, this.top.h, true);
-               
-                // Bottom Pipe
                 drawCoralPipe(p.x, bottomYPos, this.bottom.w, this.bottom.h, false);
             }
         },
-       
+
         update: function() {
             if(state.current !== state.game) return;
-           
-            // Add new pipes
-            if(frames % 100 === 0) {
+
+            const diff = getDifficulty(score);
+            this.dx = diff.speed;
+            this.gap = diff.gap;
+
+            if(frames % diff.pipeInterval === 0) {
                 this.position.push({
                     x: canvas.width,
                     y: this.maxYPos * (Math.random() + 0.3),
-                    scored: false
+                    scored: false,
+                    currentGap: diff.gap
                 });
             }
-           
-            for(let i = 0; i < this.position.length; i++) {
+
+            for(let i = this.position.length - 1; i >= 0; i--) {
                 let p = this.position[i];
+                p.currentGap = diff.gap;
                 p.x -= this.dx;
-               
-                let bottomPipeYPos = p.y + this.top.h + this.gap;
-               
-                // Collision Detection
+
+                let bottomPipeYPos = p.y + this.top.h + diff.gap;
+
+                // Collision
                 let birdRect = {
                     x: bird.x + 5,
                     y: bird.y + 5,
@@ -502,46 +837,93 @@
                 };
 
                 if(checkCollision(birdRect, topPipeRect) || checkCollision(birdRect, bottomPipeRect)) {
-                    state.current = state.over;
-                    showGameOver();
+                    spawnParticles(bird.x + bird.w/2, bird.y + bird.h/2, 20, null, 5, 40);
+                    startDeathSequence();
                 }
-               
-                // Update Score (fixed: use scored flag instead of exact pixel equality)
+
+                // Score
                 if(!p.scored && p.x + this.top.w < bird.x) {
                     p.scored = true;
                     score += 1;
                     liveScoreText.innerText = score;
+                    liveScoreText.classList.add('pop');
+                    setTimeout(() => liveScoreText.classList.remove('pop'), 100);
+                    SFX.score();
+                    spawnScoreParticles(bird.x + bird.w, bird.y + bird.h/2);
                 }
-               
-                // Remove pipes that passed the canvas
+
+                // Remove pipes that passed
                 if(p.x + this.top.w <= 0) {
-                    this.position.shift();
-                    i--;
+                    this.position.splice(i, 1);
                 }
             }
         },
-       
+
         reset: function() {
             this.position = [];
         }
     };
 
+    // ========== DEATH SEQUENCE ==========
+
+    function startDeathSequence() {
+        if (state.current === state.dying || state.current === state.over) return;
+        state.current = state.dying;
+        bird.dead = true;
+        deathTimer = 0;
+        SFX.die();
+        triggerShake(6, 15);
+        // Spawn explosion particles at bird position
+        spawnParticles(bird.x + bird.w/2, bird.y + bird.h/2, 25, null, 6, 50);
+    }
+
     // --- RENDER & GAME LOOP ---
 
     function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+
+        // Screen shake offset
+        if (shakeDuration > 0) {
+            const shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
+            const shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
+            ctx.translate(shakeX, shakeY);
+        }
+
+        ctx.clearRect(-10, -10, canvas.width + 20, canvas.height + 20);
         bg.draw();
         bubbles.draw();
         pipes.draw();
         floor.draw();
         bird.draw();
+        drawParticles();
+
+        ctx.restore();
     }
 
     function update() {
+        // Screen shake decay
+        if (shakeDuration > 0) {
+            shakeDuration--;
+            shakeIntensity *= 0.9;
+        }
+
+        if (state.current === state.dying) {
+            deathTimer++;
+            bird.update();
+            pipes.draw(); // still draw pipes but don't update them
+            updateParticles();
+            if (deathTimer >= DEATH_DURATION) {
+                state.current = state.over;
+                showGameOver();
+            }
+            return;
+        }
+
         bubbles.update();
         bird.update();
         floor.update();
         pipes.update();
+        updateParticles();
     }
 
     function loop() {
@@ -555,7 +937,7 @@
 
     function drawPreview() {
         previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-        drawSpongeBobCharacter(previewCtx, 80, 100);
+        drawSpongeBobCharacter(previewCtx, 80, 100, false);
     }
 
     function showStartScreen() {
@@ -576,15 +958,31 @@
 
     function showGameOver() {
         liveScoreText.classList.add('hidden');
-        gameOverScreen.classList.remove('hidden');
-        gameOverScreen.classList.add('visible');
-       
         finalScoreText.innerText = score;
+
         if(score > bestScore) {
             bestScore = score;
             localStorage.setItem('flappyBobBestScore', bestScore);
         }
         bestScoreText.innerText = bestScore;
+
+        // Medal display
+        const medal = getMedal(score);
+        if (medal) {
+            medalDisplay.classList.remove('hidden');
+            medalDisplay.textContent = medal.emoji;
+            medalText.classList.remove('hidden');
+            medalText.textContent = medal.text;
+            medalText.style.color = medal.color;
+            medalText.style.textShadow = medal.color + ' 0 0 10px';
+            SFX.medal();
+        } else {
+            medalDisplay.classList.add('hidden');
+            medalText.classList.add('hidden');
+        }
+
+        gameOverScreen.classList.remove('hidden');
+        gameOverScreen.classList.add('visible');
     }
 
     function resetGame() {
@@ -592,8 +990,13 @@
         bird.speedReset();
         bird.y = 150;
         bird.rotation = 0;
+        bird.dead = false;
         score = 0;
         frames = 0;
+        particles = [];
+        shakeIntensity = 0;
+        shakeDuration = 0;
+        deathTimer = 0;
         gameOverScreen.classList.remove('visible');
         gameOverScreen.classList.add('hidden');
         showStartScreen();
@@ -611,8 +1014,13 @@
             }
         }
 
+        // Ignore input during death sequence
+        if (state.current === state.dying) return;
+
         switch(state.current) {
             case state.getReady:
+                initAudio();
+                SFX.swoosh();
                 state.current = state.game;
                 hideStartScreen();
                 bird.flap();
@@ -630,12 +1038,14 @@
     window.addEventListener('keydown', handleInput, { passive: false });
     canvas.addEventListener('touchstart', handleInput, { passive: false });
 
-    restartBtn.addEventListener('click', () => {
+    restartBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         resetGame();
     });
-   
+
     restartBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         resetGame();
     }, { passive: false });
 
