@@ -17,7 +17,7 @@
             align-items: center;
             height: 100vh;
             overflow: hidden;
-            touch-action: none;
+            touch-action: manipulation;
             user-select: none;
             -webkit-user-select: none;
         }
@@ -1114,8 +1114,8 @@
     // Game input
     // Click: game-container only (prevents desktop background from flapping)
     gameContainer.addEventListener('click', handleInput);
-    // Touch: full window — so landscape taps on the side bars still flap
-    window.addEventListener('touchstart', handleInput, { passive: false });
+    // Touch: full document — so landscape taps on the side bars still flap
+    document.addEventListener('touchstart', handleInput, { passive: false });
     // Keyboard: spacebar
     window.addEventListener('keydown', handleInput, { passive: false });
 
