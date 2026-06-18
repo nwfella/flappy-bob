@@ -1111,9 +1111,12 @@
         }
     }
 
-    // Main game input: attach to container so overlays don't block taps
+    // Game input
+    // Click: game-container only (prevents desktop background from flapping)
     gameContainer.addEventListener('click', handleInput);
-    gameContainer.addEventListener('touchstart', handleInput, { passive: false });
+    // Touch: full window — so landscape taps on the side bars still flap
+    window.addEventListener('touchstart', handleInput, { passive: false });
+    // Keyboard: spacebar
     window.addEventListener('keydown', handleInput, { passive: false });
 
     restartBtn.addEventListener('click', (e) => {
