@@ -24,11 +24,11 @@
 
         #game-container {
             position: relative;
-            width: 100%;
-            height: 100svh;
-            max-width: 100vw;
-            max-height: 100svh;
+            /* Width: try to fill the viewport height at 2:3 ratio, 
+               but never exceed the viewport width */
+            width: min(100vw, calc(100svh * 2 / 3));
             aspect-ratio: 2 / 3;
+            max-height: 100svh;
             background: linear-gradient(180deg, #4ac4f2 0%, #1579b8 100%);
             overflow: hidden;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
@@ -36,10 +36,8 @@
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
             touch-callout: none;
+            flex-shrink: 0;
         }
-
-        /* No landscape cap — aspect-ratio automatically maximizes the play area
-           on every device. On desktop, just resize the browser if you want it smaller. */
 
         canvas {
             display: block;
