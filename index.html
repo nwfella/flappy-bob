@@ -1,3 +1,7 @@
+Error while loading conda entry point: anaconda-auth (No module named 'pydantic_core._pydantic_core')
+Error while loading conda entry point: conda-anaconda-tos (No module named 'pydantic_core._pydantic_core')
+Error while loading conda entry point: anaconda-auth (No module named 'pydantic_core._pydantic_core')
+Error while loading conda entry point: conda-anaconda-tos (No module named 'pydantic_core._pydantic_core')
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -781,6 +785,7 @@
         dx: 2.5,
         gap: 130,
         maxYPos: -150,
+        spawnCounter: 0,
 
         draw: function() {
             for(let i = 0; i < this.position.length; i++) {
@@ -838,7 +843,9 @@
             this.dx = diff.speed;
             this.gap = diff.gap;
 
-            if(frames % diff.pipeInterval === 0) {
+            this.spawnCounter++;
+            if (this.spawnCounter >= diff.pipeInterval) {
+                this.spawnCounter = 0;
                 this.position.push({
                     x: canvas.width,
                     y: this.maxYPos * (Math.random() + 0.3),
@@ -906,6 +913,7 @@
 
         reset: function() {
             this.position = [];
+            this.spawnCounter = 0;
         }
     };
 
