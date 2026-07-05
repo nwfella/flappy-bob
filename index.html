@@ -429,9 +429,9 @@
     function getDifficulty(score) {
         const level = Math.floor(score / 5);
         return {
-            gap: Math.max(100, 130 - level * 4),
+            gap: Math.max(104, 135 - level * 4),
             speed: Math.min(5, 2.5 + level * 0.3),
-            pipeInterval: Math.max(70, 100 - level * 3)
+            pipeInterval: Math.max(80, 110 - level * 3)
         };
     }
 
